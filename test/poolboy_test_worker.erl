@@ -12,8 +12,10 @@ start_link(_Args) ->
 init([]) ->
     {ok, undefined}.
 
-handle_call(die, _From, State) ->
-    {stop, {error, died}, dead, State};
+handle_call(stop, _From, State) ->
+    {stop, normal, ok, State};
+handle_call(crash, _From, State) ->
+    {stop, crash, ok, State};
 handle_call(_Event, _From, State) ->
     {reply, ok, State}.
 
