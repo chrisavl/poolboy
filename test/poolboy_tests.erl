@@ -21,6 +21,9 @@ pool_test_() ->
             {<<"Pool overflow should work">>,
                 fun pool_overflow/0
             },
+            {<<"Pool overflow should be optional">>,
+                fun pool_optional_overflow/0
+            },
             {<<"Pool behaves when empty">>,
                 fun pool_empty/0
             },
@@ -113,6 +116,28 @@ pool_overflow() ->
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
+
+pool_optional_overflow() ->
+    %% Check that optional overflow works.
+    Timeout = 1000,
+    NumWorkers = 3,
+    MaxOverflow = 1,
+    {ok, Pool} = new_pool(NumWorkers, MaxOverflow),
+    _Workers = [poolboy:checkout(Pool) || _ <- lists:seq(1, NumWorkers)],
+    ?assertEqual(0, length(pool_call(Pool, get_avail_workers))),
+    ?assertEqual(NumWorkers, length(pool_call(Pool, get_all_workers))),
+    ?assertEqual(full, poolboy:checkout(Pool, false, false, Timeout)),
+    OverflowWorker = poolboy:checkout(Pool, false, true, Timeout),
+    ?assert(is_pid(OverflowWorker)),
+    ?assert(erlang:is_process_alive(OverflowWorker)),
+    ?assertEqual(0, length(pool_call(Pool, get_avail_workers))),
+    ?assertEqual(NumWorkers+1, length(pool_call(Pool, get_all_workers))),
+    ?assertEqual(full, poolboy:checkout(Pool, false, true, Timeout)),
+    checkin_worker(Pool, OverflowWorker),
+    ?assertEqual(0, length(pool_call(Pool, get_avail_workers))),
+    ?assertEqual(NumWorkers, length(pool_call(Pool, get_all_workers))),
+    ?assertEqual(full, poolboy:checkout(Pool, false, false, Timeout)),
+    ok = pool_call(Pool, stop).
 
 pool_empty() ->
     %% Checks that the the pool handles the empty condition correctly when

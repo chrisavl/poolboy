@@ -3,9 +3,9 @@
 -module(poolboy).
 -behaviour(gen_server).
 
--export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
-         transaction/3, child_spec/2, child_spec/3, start/1, start/2,
-         start_link/1, start_link/2, stop/1, status/1]).
+-export([checkout/1, checkout/2, checkout/3, checkout/4, checkin/2,
+         transaction/2, transaction/3, child_spec/2, child_spec/3,
+         start/1, start/2, start_link/1, start_link/2, stop/1, status/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
@@ -48,8 +48,13 @@ checkout(Pool, Block) ->
 -spec checkout(Pool :: pool(), Block :: boolean(), Timeout :: timeout())
     -> pid() | full.
 checkout(Pool, Block, Timeout) ->
+    checkout(Pool, Block, true, Timeout).
+
+-spec checkout(Pool :: pool(), Block :: boolean(), Overflow :: boolean(),
+               Timeout :: timeout()) -> pid() | full.
+checkout(Pool, Block, Overflow, Timeout) ->
     try
-        gen_server:call(Pool, {checkout, Block}, Timeout)
+        gen_server:call(Pool, {checkout, Block, Overflow}, Timeout)
     catch
         Class:Reason ->
             gen_server:cast(Pool, {cancel_waiting, self()}),
@@ -158,7 +163,7 @@ handle_cast({cancel_waiting, Pid}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_call({checkout, Block}, {FromPid, _} = From, State) ->
+handle_call({checkout, Block, AllowOverflow}, {FromPid, _} = From, State) ->
     #state{supervisor = Sup,
            workers = Workers,
            monitors = Monitors,
@@ -169,7 +174,7 @@ handle_call({checkout, Block}, {FromPid, _} = From, State) ->
             Ref = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
             {reply, Pid, State#state{workers = Left}};
-        [] when MaxOverflow > 0, Overflow < MaxOverflow ->
+        [] when MaxOverflow > 0, Overflow < MaxOverflow, AllowOverflow =:= true ->
             {Pid, Ref} = new_worker(Sup, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
             {reply, Pid, State#state{overflow = Overflow + 1}};
