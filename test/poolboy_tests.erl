@@ -33,9 +33,6 @@ pool_test_() ->
             {<<"Pool behaves on worker death">>,
                 fun worker_death/0
             },
-            {<<"Pool should crash on non-normal worker death">>,
-                fun worker_crash/0
-            },
             {<<"Pool behaves when full and a worker dies">>,
                 fun worker_death_while_full/0
             },
@@ -67,15 +64,12 @@ pool_test_() ->
     }.
 
 %% Tell a worker to exit and await its impending doom.
-stop_worker(Pid) -> kill_worker(Pid, stop).
-crash_worker(Pid) -> kill_worker(Pid, crash).
-
-kill_worker(Pid, Mode) ->
+kill_worker(Pid) ->
     erlang:monitor(process, Pid),
-    pool_call(Pid, Mode),
+    pool_call(Pid, die),
     receive
-        {'DOWN', _, process, Pid, Reason} ->
-            {ok, Reason}
+        {'DOWN', _, process, Pid, _} ->
+            ok
     end.
 
 checkin_worker(Pid, Worker) ->
@@ -238,29 +232,20 @@ worker_death() ->
     %% and the overflow count is 0. Meaning, don't restart overflow workers.
     {ok, Pid} = new_pool(5, 2),
     Worker = poolboy:checkout(Pid),
-    stop_worker(Worker),
+    kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
     [A, B, C|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
-    stop_worker(A),
+    kill_worker(A),
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(6, length(pool_call(Pid, get_all_workers))),
-    stop_worker(B),
-    stop_worker(C),
+    kill_worker(B),
+    kill_worker(C),
     ?assertEqual(1, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(4, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
-
-worker_crash() ->
-    %% Non-normal exits should kill the pool
-    {ok, Pool} = new_pool(5, 2),
-    unlink(Pool),
-    Worker = poolboy:checkout(Pool),
-    ?assertEqual({ok, crash}, crash_worker(Worker)),
-    timer:sleep(500),
-    ?assertNot(erlang:is_process_alive(Pool)).
 
 worker_death_while_full() ->
     %% Check that if a worker dies while the pool is full and there is a
@@ -268,7 +253,7 @@ worker_death_while_full() ->
     %% If there are no queued checkouts, a new worker is not started.
     {ok, Pid} = new_pool(5, 2),
     Worker = poolboy:checkout(Pid),
-    stop_worker(Worker),
+    kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
     [A, B|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
@@ -289,7 +274,7 @@ worker_death_while_full() ->
     after
         500 -> ?assert(true)
     end,
-    stop_worker(A),
+    kill_worker(A),
 
     %% Spawned process should have been able to obtain a worker.
     receive
@@ -297,7 +282,7 @@ worker_death_while_full() ->
     after
         1000 -> ?assert(false)
     end,
-    stop_worker(B),
+    kill_worker(B),
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(6, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(6, length(pool_call(Pid, get_all_monitors))),
@@ -309,7 +294,7 @@ worker_death_while_full_no_overflow() ->
     %% checkouts are serviced.
     {ok, Pid} = new_pool(5, 0),
     Worker = poolboy:checkout(Pid),
-    stop_worker(Worker),
+    kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
     [A, B, C|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
@@ -329,7 +314,7 @@ worker_death_while_full_no_overflow() ->
     after
         500 -> ?assert(true)
     end,
-    stop_worker(A),
+    kill_worker(A),
 
     %% Spawned process should have been able to obtain a worker.
     receive
@@ -337,10 +322,10 @@ worker_death_while_full_no_overflow() ->
     after
         1000 -> ?assert(false)
     end,
-    stop_worker(B),
+    kill_worker(B),
     ?assertEqual(1, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
-    stop_worker(C),
+    kill_worker(C),
     ?assertEqual(2, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(3, length(pool_call(Pid, get_all_monitors))),
